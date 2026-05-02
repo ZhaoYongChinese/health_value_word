@@ -1,0 +1,9 @@
+主要：
+https://gemini.google.com/app/28cb549c168da239
+
+辅助：
+https://chat.deepseek.com/a/chat/s/f913a62b-d350-4690-954c-5df304fe7204
+
+faulty_word.py这是我朋友发给我的参考，现在参考这份诊断报告为直梯写相关程序：
+
+要点1：输入是两个文件，一个是故障数据文件csv格式的，格式为第一行故障类型名称，motor_fault、bearing_fault、bolt_loose、wire_rope、guide_rail和car，第二行为数据采样率，16000、32000等等，后续为具体数据，motor_fault这样的直接就是一列数据，car这样的是三列数据，就是还有一一行，是one，或者x，y，z，这行后面开始就是具体数据。

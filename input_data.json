@@ -1,0 +1,45 @@
+{
+  "input_data": {
+    "曳引机": {
+      "motor_fault": {
+        "rms_ratio": 1.2,
+        "confidence": 0.85
+      },
+      "bearing_fault": {
+        "rms_ratio": 1,
+        "confidence": 0.95
+      },
+      "bolt_loose": {
+        "rms_ratio": 1.5
+      }
+    },
+    "钢丝绳": {
+      "rms_baseline_ratio": 10
+    },
+    "导轨": {
+      "wear_percent": 15.0
+    },
+    "轿厢": {
+      "directions": [
+        {
+          "name": "X",
+          "crest_factor_ratio": 1.5,
+          "impulse_factor_ratio": 1.2,
+          "margin_factor_ratio": 1.0
+        },
+        {
+          "name": "Y",
+          "crest_factor_ratio": 1.2,
+          "impulse_factor_ratio": 1.1,
+          "margin_factor_ratio": 1.0
+        },
+        {
+          "name": "Z",
+          "crest_factor_ratio": 1.0,
+          "impulse_factor_ratio": 1.0,
+          "margin_factor_ratio": 1.0
+        }
+      ]
+    }
+  }
+}
