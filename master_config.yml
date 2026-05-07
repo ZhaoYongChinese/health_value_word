@@ -1,0 +1,95 @@
+# ================= 1. 报告基本信息 =================
+report_info:
+  title: "直梯运行状态智能化诊断报告"
+
+# ================= 2. 传感器环境与设备映射 =================
+# 配置传感器的位置和它监测的核心部件
+sensor_mapping:
+  "81025": 
+    location: "中科院西侧"
+    component: "曳引机"
+  "81026":
+    location: "中科院东侧"
+    component: "钢丝绳"
+  "81027":
+    location: "中科院主楼"
+    component: "轿厢"
+  "81028":
+    location: "中科院主楼"
+    component: "导轨"
+
+# ================= 3. 专家评估与维修建议 =================
+# 根据故障类型和严重等级（H1-H4）动态抓取建议
+expert_advice:
+  motor_fault:
+    H1: "曳引机电机运行平稳，频域未见明显倍频特征，建议保持日常巡检。"
+    H2: "电机出现轻微偏心征兆，注意观察运行噪音。"
+    H3: "【预警】电机振动明显，建议停梯检查固定底座及同心度。"
+    H4: "【高危】电机存在严重的转子不对中或定子偏心，建议立即停机进行激光对中校准！"
+  bearing_fault:
+    H4: "【高危】轴承包络谱出现明显内外圈/滚动体故障特征频率，存在碎裂风险，请立即停机开盖更换轴承。"
+  bolt_loose:
+    H4: "【高危】检测到严重的宽频冲击信号，曳引机底座螺栓极度松动，必须立即禁行并重新锁紧打上扭力标！"
+  wire_rope:
+    H4: "【高危】钢丝绳RMS振幅极高，疑似严重打滑或张力极度不均，必须立刻停梯进行曳引轮和钢丝绳探伤检测！"
+  guide_rail:
+    H4: "【高危】导轨磨损指标严重超限，可能导致轿厢剧烈抖动卡阻，建议立即全面校轨更换导靴。"
+  car:
+    H4: "【高危】轿厢出现严重的三轴宽频振动，平稳度极差，建议立刻检查导靴磨损、反绳轮及风速干扰。"
+  default:
+    H4: "【高危】设备出现未知严重异常，请立刻停梯安排人工全面排查！"
+
+# ================= 4. 可视化指标打印配置 =================
+# 指导画图程序，遇到对应故障时，在波形图右上角贴上哪些关键参数
+visual_config:
+  wire_rope:
+    display_metrics: ["rms_baseline_ratio", "score"]
+  car:
+    display_metrics: ["avg_vibration", "score"]
+  motor_fault:
+    display_metrics: ["rms_ratio", "confidence", "score"]
+  bearing_fault:
+    display_metrics: ["rms_ratio", "confidence", "score"]
+  bolt_loose:
+    display_metrics: ["rms_ratio", "score"]
+  guide_rail:
+    display_metrics: ["wear_percent", "score"]
+
+# ================= 5. 健康度评估体系 (继承 health_evaluator) =================
+health_evaluation:
+  device_weights:
+    曳引机: 0.4
+    钢丝绳: 0.2
+    导轨: 0.15
+    轿厢: 0.25
+  default_grade_ranges:
+    H1: [90, 101]
+    H2: [75, 90]
+    H3: [60, 75]
+    H4: [0, 60]
+  system_safety_baseline: 60.0
+  scoring_params:
+    traction:
+      grade_ranges: {H1: [90, 101], H2: [75, 90], H3: [60, 75], H4: [0, 60]}
+      fault_weights: {motor_fault: 0.3, bearing_fault: 0.5, bolt_loose: 0.2}
+      fault_grade_ranges:
+        motor_fault: {H1: [90, 101], H2: [80, 90], H3: [70, 80], H4: [0, 70]}
+        bearing_fault: {H1: [90, 101], H2: [75, 90], H3: [60, 75], H4: [0, 60]}
+        bolt_loose: {H1: [90, 101], H2: [70, 90], H3: [40, 70], H4: [0, 40]}
+      rms_penalty_per_unit: 40.0
+      bolt_penalty_per_unit: 20.0
+      confidence_factor: 1.0
+    wire_rope:
+      segments:
+        - {range: [0, 4], score: [100, 100]}
+        - {range: [4, 6], score: [100, 70]}
+        - {range: [6, 8], score: [70, 30]}
+        - {range: [8, 9999], score: [30, 0]}
+    guide_rail:
+      max_wear: 100
+    car:
+      vibration_threshold: 4.0
+      smoothness_threshold: 2.0
+      vibration_penalty_score: 50.0
+      smoothness_penalty_score: 75.0
+      base_penalty_slope: 5.0
