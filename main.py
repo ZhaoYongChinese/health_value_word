@@ -3,9 +3,9 @@ import glob
 import pandas as pd
 import numpy as np
 import yaml
+import json
 from loguru import logger
 
-# 引入我们刚才写的模块
 from signal_features import extract_features
 from health_evaluator import HealthEvaluator
 from visualizer import SignalVisualizer
@@ -51,14 +51,14 @@ class DiagnosticPipeline:
             logger.error(f"在 {data_folder} 中未找到 CSV 文件！")
             return
 
-        # ================= 1. 遍历计算 =================
+        # ================= 1. 遍历计算波形数据 =================
         for file in csv_files:
             try:
                 sensor_id, fault_type, fs, signal_data = self._parse_csv(file)
                 mapping = self.config.get('sensor_mapping', {}).get(sensor_id, {})
                 device_category = mapping.get('component', '未知设备')
                 
-                features = extract_features(fault_type, signal_data)
+                features = extract_features(fault_type, signal_data, fs)
                 
                 if device_category == "曳引机":
                     aggregated_data[device_category][fault_type] = features
@@ -75,49 +75,68 @@ class DiagnosticPipeline:
             except Exception as e:
                 logger.error(f"处理文件 {file} 失败: {e}")
 
+        # --- 注入环境与电气数据 (演示逻辑：在实际场景中可能来自于API或其他传感器) ---
+        env_test_file = os.path.join(data_folder, "env_data.json")
+        if os.path.exists(env_test_file):
+            with open(env_test_file, 'r', encoding='utf-8') as f:
+                aggregated_data["环境与电气"] = json.load(f)
+        else:
+            # 没有独立文件则模拟环境恶化 (供测试使用)
+            aggregated_data["环境与电气"] = {"temperature": 35.0, "water": 0, "displacement": 8.0}
+
         # ================= 2. 综合打分 =================
         evaluation_result = self.evaluator.evaluate(aggregated_data)
         logger.info(f"整体健康度评估完成，总得分: {evaluation_result['score']} ({evaluation_result['grade']})")
 
-        # ================= 3. 寻找最差项画图 =================
+        # ================= 3. 寻找最差项 (兼顾机械本体与环境) =================
         worst_score = 101.0  
         worst_device, worst_f_name = "未知", "未知"
+        worst_detail = {}
+        is_environment_issue = False
         
-        for device, info in evaluation_result['device_scores'].items():
+        # 3.1 遍历机械项
+        for device, info in evaluation_result.get('device_scores', {}).items():
             for f_name, detail in info.get('details', {}).items():
                 if detail['score'] < worst_score:
                     worst_score = detail['score']
                     worst_device = device
                     worst_f_name = f_name
+                    worst_detail = detail
         
-        # 提前把最差的分数详情取出来，直接传给生成器，免去各种KeyError
-        worst_detail = evaluation_result['device_scores'].get(worst_device, {}).get('details', {}).get(worst_f_name, {})
-        
-        fault_type_mapping = {
-            "曳引机": worst_f_name, 
-            "钢丝绳": "wire_rope",
-            "轿厢": "car",
-            "导轨": "guide_rail"
-        }
-        worst_fault_type = fault_type_mapping.get(worst_device, worst_f_name)
-        worst_fault_key = f"{worst_device}_{worst_fault_type}"
+        # 3.2 遍历环境项比对短板
+        for env_name, info in evaluation_result.get('env_scores', {}).items():
+            if info['score'] < worst_score:
+                worst_score = info['score']
+                worst_device = "环境与电气"
+                worst_f_name = env_name
+                worst_detail = info
+                is_environment_issue = True
         
         img_paths = {}
         worst_data_info = {}
-        if worst_fault_key in self.raw_data_cache:
-            worst_data_info = self.raw_data_cache[worst_fault_key]
-            logger.info(f"锁定得分最低项: {worst_fault_key} ({worst_score}分)，生成自适应波形图...")
+        
+        # 只有机械问题且在缓存中有波形时才画图
+        if not is_environment_issue:
+            fault_type_mapping = {"曳引机": worst_f_name, "钢丝绳": "wire_rope", "轿厢": "car", "导轨": "guide_rail"}
+            worst_fault_type = fault_type_mapping.get(worst_device, worst_f_name)
+            worst_fault_key = f"{worst_device}_{worst_fault_type}"
             
-            display_cfg = self.config.get('visual_config', {}).get(worst_fault_type, {})
-            metrics_to_display = display_cfg.get('display_metrics', [])
-            
-            combined_metrics = {**worst_data_info['features'], **worst_detail}
-            img_paths = self.visualizer.plot_worst_case(worst_data_info, metrics_to_display, combined_metrics)
+            if worst_fault_key in self.raw_data_cache:
+                worst_data_info = self.raw_data_cache[worst_fault_key]
+                logger.info(f"锁定得分最低项: {worst_fault_key} ({worst_score}分)，生成自适应波形图...")
+                
+                display_cfg = self.config.get('visual_config', {}).get(worst_fault_type, {})
+                metrics_to_display = display_cfg.get('display_metrics', [])
+                
+                combined_metrics = {**worst_data_info['features'], **worst_detail}
+                img_paths = self.visualizer.plot_worst_case(worst_data_info, metrics_to_display, combined_metrics)
+        else:
+            logger.warning(f"最差项为环境指标 [{worst_f_name}]，跳过波形图生成。")
+            worst_data_info = {"location": "机房/底坑/井道", "component": "环境与电气传感系统", "sensor_id": "N/A", "fs": "N/A", "signal_data": []}
 
         # ================= 4. 组装 Word 报告 =================
         reporter = FinalReportGenerator(self.config, evaluation_result)
-        # 将参数拆分开，直接传入明确的 worst_device, worst_fault_type 和 worst_detail
-        reporter.generate(worst_device, worst_fault_type, worst_detail, img_paths, worst_data_info, output_report_path)
+        reporter.generate(worst_device, worst_f_name, worst_detail, img_paths, worst_data_info, output_report_path)
 
 if __name__ == "__main__":
     pipeline = DiagnosticPipeline("master_config.yml")

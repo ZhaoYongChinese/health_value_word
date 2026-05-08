@@ -18,7 +18,6 @@ class FinalReportGenerator:
         if color: run.font.color.rgb = color
 
     def generate(self, worst_device: str, worst_fault_type: str, worst_detail: dict, img_paths: dict, worst_data_info: dict, output_path: str):
-        # --- 全局字体 ---
         style = self.doc.styles['Normal']
         style.font.name = 'Times New Roman'
         style.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
@@ -43,9 +42,10 @@ class FinalReportGenerator:
         self.set_font_style(p1.add_run(sys_grade), bold=True, color=color)
 
         table = self.doc.add_table(rows=1, cols=4); table.style = 'Table Grid'
-        for cell, text in zip(table.rows[0].cells, ['检测部件', '部件得分', '具体故障项', '故障项得分/等级']):
+        for cell, text in zip(table.rows[0].cells, ['检测部件/环境', '主分类得分', '具体检测项', '检测项得分/等级']):
             self.set_font_style(cell.paragraphs[0].add_run(text), bold=True)
 
+        # 1. 渲染机械数据
         for device, info in self.eval_result.get('device_scores', {}).items():
             for fault_name, detail in info.get('details', {}).items():
                 row = table.add_row().cells
@@ -55,14 +55,23 @@ class FinalReportGenerator:
                 grade_str = f" / {detail['grade']}" if 'grade' in detail else ""
                 row[3].text = f"{detail['score']}{grade_str}"
 
+        # 2. 渲染环境数据
+        if self.eval_result.get('env_scores'):
+            for env_name, info in self.eval_result['env_scores'].items():
+                row = table.add_row().cells
+                row[0].text = "环境与电气"
+                row[1].text = "-"
+                row[2].text = env_name
+                row[3].text = f"{info['score']} / {info.get('grade', '-')}"
+
         # --- 标题2：设备环境与采样信息 ---
         h2 = self.doc.add_heading('', level=1)
-        self.set_font_style(h2.add_run('二、设备环境与采样信息'), size_pt=14, bold=True)
+        self.set_font_style(h2.add_run('二、报警源定位信息'), size_pt=14, bold=True)
         
         p2 = self.doc.add_paragraph()
         loc = worst_data_info.get('location', '未知')
         comp = worst_data_info.get('component', '未知')
-        p2.add_run(f"本次报告聚焦于得分最低的预警项。该信号采集于位置【{loc}】的【{comp}】部件。")
+        p2.add_run(f"本次报告聚焦于得分最低的预警项。触发警报源于位置【{loc}】的【{comp}】。")
         
         info_table = self.doc.add_table(rows=3, cols=2); info_table.style = 'Table Grid'
         details = [
@@ -87,17 +96,21 @@ class FinalReportGenerator:
         p3_desc.add_run(f"经系统计算，该指标当前得分为 {worst_detail.get('score', 'N/A')} 分")
         if 'grade' in worst_detail:
             p3_desc.add_run(f" (风险等级: {worst_detail['grade']})")
-        p3_desc.add_run("，为本次巡检中情况最差环节。")
+        p3_desc.add_run("，为本次巡检中情况最危险环节。")
 
-        # --- 标题4：可视化分析验证 ---
+        # --- 标题4：可视化分析验证 (环境报警则跳过) ---
         h4 = self.doc.add_heading('', level=1)
         self.set_font_style(h4.add_run('四、可视化分析验证'), size_pt=14, bold=True)
         
-        img_titles = [('time', '图1：原始信号时域波形'), ('spectrum', '图2：原始信号频谱图 (FFT)'), ('envelope', '图3：包络解调谱')]
-        for key, title in img_titles:
-            if key in img_paths and os.path.exists(img_paths[key]):
-                self.doc.add_picture(img_paths[key], width=Inches(6.0))
-                self.doc.add_paragraph(title).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        if img_paths:
+            img_titles = [('time', '图1：原始信号时域波形'), ('spectrum', '图2：原始信号频谱图 (FFT)'), ('envelope', '图3：包络解调谱')]
+            for key, title in img_titles:
+                if key in img_paths and os.path.exists(img_paths[key]):
+                    self.doc.add_picture(img_paths[key], width=Inches(6.0))
+                    self.doc.add_paragraph(title).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        else:
+            p_img = self.doc.add_paragraph()
+            self.set_font_style(p_img.add_run("当前报警项为环境状态，无需波形图验证。"), color=RGBColor(128, 128, 128))
 
         # --- 标题5：专家评估与维修建议 ---
         h5 = self.doc.add_heading('', level=1)

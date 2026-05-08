@@ -1,94 +1,32 @@
-# 电梯健康度评估配置文件
+# ========================================================
+# 现场配置项：用于分配各级设备的权重及开启/关闭环境检测功能
+# (具体的等级划分阈值等工程红线参数已固化在 health_evaluator.py 中)
+# ========================================================
 
-# 1. 各设备的权重划分
+# 1. 机械本体设备的权重划分 (第一层设备级)
 device_weights:
   曳引机: 0.4
   钢丝绳: 0.2
   导轨: 0.15
   轿厢: 0.25
 
-# 2. 全局默认的健康等级划分（如果某个设备或故障没有单独配置，将使用此默认值）
-default_grade_ranges:
-  H1: [90, 101]
-  H2: [75, 90]
-  H3: [60, 75]
-  H4: [0, 60]
+# 2. 曳引机内部主要故障的权重划分 (第二层故障级)
+fault_weights:
+  motor_fault: 0.3
+  bearing_fault: 0.5
+  bolt_loose: 0.2
 
-system_safety_baseline: 60.0
+# 3. 轴承内部各部位磨损的权重划分 (第三层子部位级)
+bearing_sub_weights:
+  inner: 0.3   # 内圈
+  outer: 0.3   # 外圈
+  cage: 0.2    # 保持架
+  ball: 0.2    # 滚动体
 
-# 3. 详细评估参数及特定等级划分
-scoring_params:
-  # --- 曳引机 ---
-  traction:
-    # 曳引机整体设备的专属H等级划分
-    grade_ranges:
-      H1: [90, 101]
-      H2: [75, 90]
-      H3: [60, 75]
-      H4: [0, 60]
-    fault_weights:
-      motor_fault: 0.3
-      bearing_fault: 0.5
-      bolt_loose: 0.2
-    # 【改进点】为每一种故障单独设定的H等级分数划分
-    fault_grade_ranges:
-      motor_fault: # 电机故障：0-70为H4
-        H1: [90, 101]
-        H2: [80, 90]
-        H3: [70, 80]
-        H4: [0, 70]
-      bearing_fault: # 轴承故障
-        H1: [90, 101]
-        H2: [75, 90]
-        H3: [60, 75]
-        H4: [0, 60]
-      bolt_loose: # 固定螺栓松动：0-40才是H4
-        H1: [90, 101]
-        H2: [70, 90]
-        H3: [40, 70]
-        H4: [0, 40]
-    safety_baseline: 60.0
-    rms_penalty_per_unit: 40.0
-    bolt_penalty_per_unit: 20.0
-    confidence_factor: 1.0
-
-  # --- 钢丝绳 ---
-  wire_rope:
-    grade_ranges:
-      H1: [90, 101]
-      H2: [80, 90]
-      H3: [60, 80]
-      H4: [0, 60]
-    # 【改进点】此处没有配置 fault_grade_ranges，因此其子故障只出分数不出H等级
-    segments:
-      - range: [0, 4]
-        score: [100, 100]
-      - range: [4, 6]
-        score: [100, 70]
-      - range: [6, 8]
-        score: [70, 30]
-      - range: [8, 9999]
-        score: [30, 0]
-
-  # --- 导轨 ---
-  guide_rail:
-    grade_ranges:
-      H1: [90, 101]
-      H2: [75, 90]
-      H3: [60, 75]
-      H4: [0, 60]
-    max_wear: 100
-
-  # --- 轿厢 ---
-  car:
-    grade_ranges:
-      H1: [90, 101]
-      H2: [80, 90]
-      H3: [65, 80]
-      H4: [0, 65]
-    # 【改进点】此处没有配置 fault_grade_ranges，其下轿架震动等指标不出H等级
-    vibration_threshold: 4.0
-    smoothness_threshold: 2.0
-    vibration_penalty_score: 50.0
-    smoothness_penalty_score: 75.0
-    base_penalty_slope: 5.0
+# 4. 环境与电气附加检测开关 (true: 启用, false: 停用)
+env_checks:
+  enable_temperature: true  # 机房/设备温度检测
+  enable_water: true        # 底坑/机房水浸检测
+  enable_current: true      # 电机电流异常检测
+  enable_noise: true        # 异常噪声检测
+  enable_displacement: true # 设备位移检测
