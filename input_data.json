@@ -6,7 +6,7 @@
         "confidence": 0.85
       },
       "bearing_fault": {
-        "rms_ratio": 4.5,
+        "rms_ratio": 1.5,
         "inner": 0.95,
         "outer": 0.20,
         "cage": 0.30,
@@ -17,7 +17,7 @@
       }
     },
     "钢丝绳": {
-      "rms_baseline_ratio": 2
+      "rms_baseline_ratio": 5
     },
     "导轨": {
       "wear_percent": 15.0
@@ -32,18 +32,24 @@
         },
         {
           "name": "Y",
+          "crest_factor_ratio": 5.2,
+          "impulse_factor_ratio": 6.1,
+          "margin_factor_ratio": 3.0
+        },
+        {
+          "name": "Z",
           "crest_factor_ratio": 1.2,
-          "impulse_factor_ratio": 1.1,
-          "margin_factor_ratio": 1.0
+          "impulse_factor_ratio": 4.1,
+          "margin_factor_ratio": 5.0
         }
       ]
     },
     "环境与电气": {
-      "temperature": 45.0,
+      "temperature": 25.0,
       "water": 0,
       "motor_current": 0,
       "noise_ratio": 1.5,
-      "displacement": 7.5
+      "displacement": 2.5
     }
   }
 }
