@@ -53,3 +53,13 @@
     }
   }
 }
+
+    "环境与电气": {
+      "temperature": 2, # 温度5s内超出阈值2次
+      "water": 0, # 水浸5s内检测到0次
+      "motor_current": 0, # 电流异常5s内检测到0次
+      "noise_ratio": 3, # 噪声异常5s内检测到3次
+      "displacement": 2 # 位移异常5s内检测到2次
+    }
+  }
+}

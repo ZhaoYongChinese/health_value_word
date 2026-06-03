@@ -5,10 +5,11 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
 class FinalReportGenerator:
-    def __init__(self, config: dict, eval_result: dict):
+    def __init__(self, config: dict, eval_result: dict, llm_advisor=None):
         self.doc = Document()
         self.config = config
         self.eval_result = eval_result
+        self.llm_advisor = llm_advisor
 
     def set_font_style(self, run, size_pt=None, bold=False, color=None):
         run.font.name = 'Times New Roman'
@@ -123,13 +124,23 @@ class FinalReportGenerator:
 
         # --- 标题5：专家评估与维修建议 ---
         self.set_font_style(self.doc.add_heading('', level=1).add_run('五、 专家多级定性建议'), size_pt=14, bold=True)
-        
+
         fuzzy_dist = worst_detail.get('fuzzy_distribution', {})
         primary_grade = max(fuzzy_dist, key=fuzzy_dist.get) if fuzzy_dist else 'H4'
-        
+
         advice_key = 'bearing_fault' if worst_fault_type.startswith('bearing_') and worst_fault_type != 'bearing_cage' else worst_fault_type
-        target_advice = self.config.get('expert_advice', {}).get(advice_key, self.config.get('expert_advice', {}).get('default', {}))
-        advice_text = target_advice.get(primary_grade, "暂无特定级别建议，请结合现场物理排查确认。")
+
+        if self.llm_advisor is not None:
+            advice_text = self.llm_advisor.generate_advice(
+                fault_type=advice_key,
+                risk_grade=primary_grade,
+                score=worst_detail.get('score'),
+                fuzzy_dist=fuzzy_dist,
+            )
+        else:
+            target_advice = self.config.get('expert_advice', {}).get(advice_key, self.config.get('expert_advice', {}).get('default', {}))
+            advice_text = target_advice.get(primary_grade, "暂无特定级别建议，请结合现场物理排查确认。")
+
         self.doc.add_paragraph().add_run(advice_text)
 
         # 追加第六项：标准免责及报告说明

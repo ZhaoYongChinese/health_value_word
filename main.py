@@ -13,6 +13,7 @@ from signal_features import extract_features
 from health_evaluator import HealthEvaluator
 from visualizer import SignalVisualizer
 from report_generator import FinalReportGenerator
+from llm_advisor import LLMAdvisor
 
 class DiagnosticPipeline:
     def __init__(self, config_path: str):
@@ -20,8 +21,9 @@ class DiagnosticPipeline:
             self.config = yaml.safe_load(f)
         
         self.evaluator = HealthEvaluator(self.config.get('health_evaluation', {}))
-        self.visualizer = None 
-        self.raw_data_cache = {} 
+        self.visualizer = None
+        self.raw_data_cache = {}
+        self.llm_advisor = LLMAdvisor(self.config)
 
     def _parse_csv(self, file_path: str):
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -151,7 +153,7 @@ class DiagnosticPipeline:
                 'signal_data': []
             }
 
-        reporter = FinalReportGenerator(self.config, eval_res)
+        reporter = FinalReportGenerator(self.config, eval_res, llm_advisor=self.llm_advisor)
         reporter.generate(worst_device, worst_f_name, worst_detail, img_paths, worst_data_info, output_report_path)
 
 if __name__ == "__main__":

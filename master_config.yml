@@ -105,3 +105,10 @@ health_evaluation:
     enable_current: true
     enable_noise: true
     enable_displacement: true
+
+# ================= 6. LLM 专家建议生成配置 =================
+llm_config:
+  enable_llm: true
+  model_id: "Qwen/Qwen2.5-1.5B-Instruct"
+  temperature: 0.8
+  max_tokens: 256
