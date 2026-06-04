@@ -43,7 +43,7 @@ class FaultDataGenerator:
             ttk.Checkbutton(lf_mech, text=name, variable=var).pack(anchor="w", padx=10, pady=5)
             
         # 环境故障区
-        lf_env = ttk.LabelFrame(self.root, text="环境与电气故障注入 (将修改 env_data.json)")
+        lf_env = ttk.LabelFrame(self.root, text="环境与电气故障注入 (将修改 env_data.json 为 1 报警)")
         lf_env.pack(padx=20, pady=10, fill="x")
         for name, var in self.env_vars.items():
             ttk.Checkbutton(lf_env, text=name, variable=var).pack(anchor="w", padx=10, pady=5)
@@ -116,14 +116,14 @@ class FaultDataGenerator:
                 selected_shorts.append(self.mech_options[name]["short"])
                 active_mech_faults.append(self.mech_options[name]["type"])
                 
-        env_status = {"temperature": 25.0, "water": 0, "displacement": 0.0, "motor_current": 0, "noise_ratio": 0.5}
+        # [调整]: 环境数据改为纯 0/1 开关量，匹配新的边缘计算下沉逻辑
+        env_status = {"temperature": 0, "water": 0, "displacement": 0, "motor_current": 0, "noise_ratio": 0}
         for name, var in self.env_vars.items():
             if var.get():
                 selected_shorts.append(self.env_options[name]["short"])
                 key = self.env_options[name]["key"]
-                if key == "water": env_status["water"] = 1
-                elif key == "temperature": env_status["temperature"] = 68.5
-                elif key == "displacement": env_status["displacement"] = 18.2
+                # 勾选即代表发生异常，置为 1
+                env_status[key] = 1
 
         folder_name = "+".join(selected_shorts) if selected_shorts else "无故障"
         
@@ -137,13 +137,14 @@ class FaultDataGenerator:
             os.makedirs(output_dir)
 
         # 3. 必须生成全套传感器的 CSV 供系统读取 (包含健康项和故障项)
+        # [调整]: 只有轿厢保留 3 通道，其他所有设备改为单通道
         standard_sensors = [
-            ("81025", "motor_fault", ["X", "Y", "Z"]),
-            ("81025", "bearing_fault", ["X", "Y", "Z"]),
-            ("81025", "bolt_loose", ["X", "Y", "Z"]),
-            ("81026", "wire_rope", ["Ch1", "Ch2"]),
-            ("81027", "car", ["X", "Y", "Z"]),
-            ("81028", "guide_rail", ["X", "Y"])
+            ("81025", "motor_fault", ["Ch1"]),
+            ("81025", "bearing_fault", ["Ch1"]),
+            ("81025", "bolt_loose", ["Ch1"]),
+            ("81026", "wire_rope", ["Ch1"]),
+            ("81027", "car", ["X", "Y", "Z"]),        # 仅轿厢为 3 通道
+            ("81028", "guide_rail", ["Ch1"])
         ]
 
         try:

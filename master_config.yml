@@ -108,7 +108,7 @@ health_evaluation:
 
 # ================= 6. LLM 专家建议生成配置 =================
 llm_config:
-  enable_llm: true
+  enable_llm: false
   model_id: "Qwen/Qwen2.5-1.5B-Instruct"
   temperature: 0.8
   max_tokens: 256
