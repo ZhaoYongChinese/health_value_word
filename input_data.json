@@ -2,7 +2,7 @@
   "input_data": {
     "曳引机": {
       "motor_fault": {
-        "rms_ratio": 1.2,
+        "rms_ratio": 3.2,
         "confidence": 0.85
       },
       "bearing_fault": {
@@ -13,7 +13,7 @@
         "ball": 0.20
       },
       "bolt_loose": {
-        "rms_ratio": 1.5
+        "rms_ratio": 4.5
       }
     },
     "钢丝绳": {
@@ -45,21 +45,11 @@
       ]
     },
     "环境与电气": {
-      "temperature": 25.0,
+      "temperature": 0,
       "water": 0,
       "motor_current": 0,
-      "noise_ratio": 1.5,
-      "displacement": 2.5
-    }
-  }
-}
-
-    "环境与电气": {
-      "temperature": 2, # 温度5s内超出阈值2次
-      "water": 0, # 水浸5s内检测到0次
-      "motor_current": 0, # 电流异常5s内检测到0次
-      "noise_ratio": 3, # 噪声异常5s内检测到3次
-      "displacement": 2 # 位移异常5s内检测到2次
+      "noise_ratio": 1,
+      "displacement": 1
     }
   }
 }

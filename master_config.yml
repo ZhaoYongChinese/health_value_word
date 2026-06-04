@@ -86,9 +86,9 @@ visual_config:
 # ================= 5. 健康度评估体系 =================
 health_evaluation:
   device_weights:
-    曳引机: 0.4
-    钢丝绳: 0.2
-    导轨: 0.15
+    曳引机: 0.25
+    钢丝绳: 0.25
+    导轨: 0.25
     轿厢: 0.25
   fault_weights:
     motor_fault: 0.3

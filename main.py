@@ -77,7 +77,6 @@ class DiagnosticPipeline:
                 bearing_params = mapping.get('bearing_params')
                 features = extract_features(fault_type, signal_data, fs, bearing_params)
                 
-                # [修复致命漏洞A]：解开数据嵌套，让导轨、钢丝绳等一层级设备不再被套成两层
                 if device_category == "曳引机":
                     aggregated_data[device_category][fault_type] = features
                 elif device_category in aggregated_data:
@@ -91,12 +90,29 @@ class DiagnosticPipeline:
             except Exception as e:
                 logger.error(f"处理文件 {file} 失败: {e}")
 
+        # =====================================================================
+        # [调整点] 针对边缘端传入的开关量 (0/1) 做解析和后备默认值处理
+        # =====================================================================
         env_file = os.path.join(data_folder, "env_data.json")
         if os.path.exists(env_file):
-            with open(env_file, 'r', encoding='utf-8') as f: aggregated_data["环境与电气"] = json.load(f)
+            with open(env_file, 'r', encoding='utf-8') as f:
+                env_raw = json.load(f)
+                # 增强鲁棒性：兼容不同的 json 嵌套格式
+                if "环境与电气" in env_raw:
+                    aggregated_data["环境与电气"] = env_raw["环境与电气"]
+                elif "input_data" in env_raw and "环境与电气" in env_raw["input_data"]:
+                    aggregated_data["环境与电气"] = env_raw["input_data"]["环境与电气"]
+                else:
+                    aggregated_data["环境与电气"] = env_raw
         else:
-            logger.warning(f"未找到 env_data.json，将使用系统模拟环境数据。")
-            aggregated_data["环境与电气"] = {"temperature": 35.0, "water": 0, "displacement": 8.0}
+            logger.warning(f"未找到 env_data.json，将使用系统无故障模拟环境数据 (全0正常状态)。")
+            aggregated_data["环境与电气"] = {
+                "temperature": 0, 
+                "water": 0, 
+                "motor_current": 0,
+                "noise_ratio": 0,
+                "displacement": 0
+            }
 
         eval_res = self.evaluator.evaluate(aggregated_data)
         logger.info(f"整体健康评估完毕 | 总分: {eval_res['score']} | 分布: {eval_res['fuzzy_distribution']}")
@@ -105,15 +121,14 @@ class DiagnosticPipeline:
         worst_device, worst_f_name, worst_detail = "未知", "未知", {}
         is_environment_issue = False
         
-        # [修复漏洞2]：先排查机械的最差报警，作为默认主角（为了有图有真相）
+        # 先排查机械的最差报警，作为默认主角（为了有图有真相）
         for device, info in eval_res.get('device_scores', {}).items():
             for f_name, detail in info.get('details', {}).items():
                 risk = self._get_risk_score(detail)
                 if risk > worst_risk:
                     worst_risk, worst_device, worst_f_name, worst_detail = risk, device, f_name, detail
         
-        # [修复漏洞2]：再排查环境风险。只有环境风险绝对超越(>)机械最差风险时，才将主角让位给环境。
-        # 即使环境是H4，如果机械也是H4，优先报机械以便给维保看波形。
+        # 再排查环境风险。只有环境风险绝对超越(>)机械最差风险时，才将主角让位给环境。
         for env_name, info in eval_res.get('env_scores', {}).items():
             risk = self._get_risk_score(info)
             if risk > worst_risk:
@@ -122,11 +137,10 @@ class DiagnosticPipeline:
 
         img_paths, worst_data_info = {}, {}
         if not is_environment_issue:
-            # [修复隐蔽漏洞C]：废除写死的字典映射，动态遍历 cache 寻找相符的原始波形钥匙
             actual_fault_name = "bearing_fault" if worst_f_name.startswith("bearing_") else worst_f_name
             cache_key = ""
             for key in self.raw_data_cache:
-                if worst_device in key: # 只要设备名字匹配上，模糊抓取波形，防止重命名丢失
+                if worst_device in key:
                     cache_key = key
                     break
 
@@ -134,7 +148,6 @@ class DiagnosticPipeline:
                 worst_data_info = self.raw_data_cache[cache_key]
                 logger.info(f"定位核心风险点: [{cache_key}], 正在生成带寻峰标记的频谱图...")
                 
-                # [适配轿厢新逻辑]：如果是轿厢，直接取 car 的绘图配置
                 vis_key = 'car' if worst_device == '轿厢' else actual_fault_name
                 display_cfg = self.config.get('visual_config', {}).get(vis_key, {})
                 combined_metrics = {**worst_data_info['features'], **worst_detail}
@@ -143,7 +156,6 @@ class DiagnosticPipeline:
                 logger.warning(f"未能从波形缓存中定位到相关数据 (设备:{worst_device})")
         else:
             logger.warning(f"最大风险源于环境/灾变 [{worst_f_name}]，跳过波形生成。")
-            # [修复漏洞1]：在报告为环境报警时，为其手工塞入一个虚拟的数据源，以防位置信息渲染为'未知'
             env_map = self.config.get('sensor_mapping', {}).get('ENV_001', {})
             worst_data_info = {
                 'sensor_id': 'ENV_001 (环境探头)',
