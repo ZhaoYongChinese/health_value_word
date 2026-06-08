@@ -245,16 +245,17 @@ def evaluate_car(data: Dict, config: Dict) -> Tuple[float, Dict]:
                 penalty_base = config.get("frame_vibration_penalty", 40.0)
     
     # 平稳度异常检测
-    anomaly_axes = []
-    for axis in ["X", "Y"]:
-        if axis in axis_data:
-            a = axis_data[axis]
-            if a["rms"] >= 1.0 and (a["pf"] > 1.0 or a["if"] > 1.0 or a["mf"] > 1.0):
-                anomaly_axes.append(a["rms"])
-    if anomaly_axes:
-        trigger_type = "smoothness"
-        used_rms = max(anomaly_axes)
-        penalty_base = config.get("smoothness_penalty", 35.0)
+    if trigger_type is None:
+        anomaly_axes = []
+        for axis in ["X", "Y"]:
+            if axis in axis_data:
+                a = axis_data[axis]
+                if a["rms"] >= 1.0 and (a["pf"] > 1.0 or a["if"] > 1.0 or a["mf"] > 1.0):
+                    anomaly_axes.append(a["rms"])
+        if anomaly_axes:
+            trigger_type = "smoothness"
+            used_rms = max(anomaly_axes)
+            penalty_base = config.get("smoothness_penalty", 35.0)
     
     # 计算得分并动态设置节点名称
     if trigger_type is None:

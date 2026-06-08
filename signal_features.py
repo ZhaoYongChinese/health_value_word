@@ -17,13 +17,13 @@ def extract_features(fault_type: str, data_dict: dict, fs: float = 10000.0, bear
     features = {}
     
     if fault_type == 'motor_fault':
-        baseline = 0.1
+        baseline = 1
         ratio = max_rms / baseline if baseline > 0 else 1.0
         confidence = min(1.0, max(0.0, (ratio - 1) * 0.2))
         features = {"rms_ratio": round(ratio, 2), "confidence": round(confidence, 2)}
         
     elif fault_type == 'bearing_fault':
-        baseline = 0.1
+        baseline = 1
         ratio = max_rms / baseline if baseline > 0 else 1.0
         
         params = bearing_params or {}
@@ -75,18 +75,17 @@ def extract_features(fault_type: str, data_dict: dict, fs: float = 10000.0, bear
         }
         
     elif fault_type == 'bolt_loose':
-        baseline = 0.1
+        baseline = 1
         features = {"rms_ratio": round(max_rms / baseline, 2) if baseline > 0 else 1.0}
         
     elif fault_type in ['wire_rope', 'rope_fault']:
-        baseline = 0.05
+        baseline = 1
         features = {"rms_baseline_ratio": round(max_rms / baseline, 2) if baseline > 0 else 1.0}
         
     elif fault_type == 'guide_rail':
         features = {"wear_percent": round(min(100.0, max_rms * 100), 2)}
         
     elif fault_type == 'car':
-        # [完全适配 elevator_car.py 逻辑] 提取Z轴和X/Y轴各自的报警状态
         has_frame_vib = False
         has_smooth_issue = False
         
@@ -107,14 +106,14 @@ def extract_features(fault_type: str, data_dict: dict, fs: float = 10000.0, bear
                 "rms": rms
             }
             
-        # Z轴逻辑 (轿架振动) - 这里简化模拟了你的新逻辑
+        # Z轴逻辑
         z_data = directions_data.get("Z", {})
         if z_data:
             exceed = sum([1 for k in ["pf", "imp", "mar"] if z_data.get(k, 0) > 5.0]) # 阈值假设
             if z_data.get("rms", 0) > 4.0 and exceed >= 2:
                 has_frame_vib = True
                 
-        # X/Y轴逻辑 (平稳度异常)
+        # X/Y轴逻辑
         for axis in ["X", "Y"]:
             a_data = directions_data.get(axis, {})
             if a_data:

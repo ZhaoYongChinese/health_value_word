@@ -2,45 +2,45 @@
   "input_data": {
     "曳引机": {
       "motor_fault": {
-        "rms_ratio": 0.2,
+        "rms_ratio": 2.2,
         "rotor_misalignment": 0.85
       },
       "bearing_fault": {
-        "rms_ratio": 0.5,
+        "rms_ratio": 3.5,
         "inner": 0.95,
         "outer": 0.20,
         "cage": 0.30,
         "ball": 0.20
       },
       "bolt_loose": {
-        "rms_ratio": 0.5
+        "rms_ratio": 5.5
       }
     },
     "钢丝绳": {
-      "rms_baseline_ratio": 0.1
+      "rms_baseline_ratio": 3.1
     },
     "导轨": {
-      "wear_percent": 2.0
+      "wear_percent": 26.0
     },
     "轿厢": {
       "directions": [
         {
           "name": "X",
-          "rms_ratio": 0.5,
+          "rms_ratio": 2.2,
           "crest_factor_ratio": 1.5,
           "impulse_factor_ratio": 1.2,
           "margin_factor_ratio": 1.0
         },
         {
           "name": "Y",
-          "rms_ratio": 0.8,
+          "rms_ratio": 3.8,
           "crest_factor_ratio": 1.2,
           "impulse_factor_ratio": 2.1,
           "margin_factor_ratio": 3.0
         },
         {
           "name": "Z",
-          "rms_ratio": 0.5,
+          "rms_ratio": 3.5,
           "crest_factor_ratio": 1.2,
           "impulse_factor_ratio": 4.1,
           "margin_factor_ratio": 1.0
@@ -48,9 +48,9 @@
       ]
     },
     "环境与电气": {
-      "temperature": 0,
+      "temperature": 1,
       "water": 0,
-      "motor_current": 0,
+      "motor_current": 1,
       "noise_ratio": 0,
       "displacement": 0
     }
