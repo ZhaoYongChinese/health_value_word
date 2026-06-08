@@ -39,11 +39,6 @@ class DiagnosticPipeline:
             data_dict[ch if ch.lower() != 'none' else f'Channel_{i+1}'] = col_data
         return sensor_id, fault_type, float(fs), data_dict
 
-    def _get_risk_score(self, detail: dict) -> tuple:
-        fuzzy = detail.get('fuzzy_distribution', {})
-        p_h4, p_h3 = fuzzy.get('H4', 0.0), fuzzy.get('H3', 0.0)
-        return (p_h4, p_h3, -detail.get('score', 100))
-
     def run_batch(self, default_data_folder="./data/test"):
         if os.path.exists(default_data_folder):
             data_folder = default_data_folder
@@ -67,6 +62,11 @@ class DiagnosticPipeline:
         logger.info(f"开始批量智能诊断，扫描文件夹: {data_folder}")
         aggregated_data = {"曳引机": {}, "钢丝绳": {}, "导轨": {}, "轿厢": {}}
         csv_files = glob.glob(os.path.join(data_folder, "*.csv"))
+        
+        # 提取基准线、电机参数与RMS滑窗过滤配置
+        signal_baselines = self.config.get('signal_baselines', {})
+        motor_params = self.config.get('motor_params', {})
+        rms_params = self.config.get('rms_window', {})
 
         for file in csv_files:
             try:
@@ -75,7 +75,13 @@ class DiagnosticPipeline:
                 device_category = mapping.get('component', '未知设备')
                 
                 bearing_params = mapping.get('bearing_params')
-                features = extract_features(fault_type, signal_data, fs, bearing_params)
+                # 传入配置的阈值及滑窗过滤参数
+                features = extract_features(
+                    fault_type, signal_data, fs, bearing_params, 
+                    baselines=signal_baselines, 
+                    motor_params=motor_params,
+                    rms_params=rms_params
+                )
                 
                 if device_category == "曳引机":
                     aggregated_data[device_category][fault_type] = features
@@ -90,14 +96,10 @@ class DiagnosticPipeline:
             except Exception as e:
                 logger.error(f"处理文件 {file} 失败: {e}")
 
-        # =====================================================================
-        # [调整点] 针对边缘端传入的开关量 (0/1) 做解析和后备默认值处理
-        # =====================================================================
         env_file = os.path.join(data_folder, "env_data.json")
         if os.path.exists(env_file):
             with open(env_file, 'r', encoding='utf-8') as f:
                 env_raw = json.load(f)
-                # 增强鲁棒性：兼容不同的 json 嵌套格式
                 if "环境与电气" in env_raw:
                     aggregated_data["环境与电气"] = env_raw["环境与电气"]
                 elif "input_data" in env_raw and "环境与电气" in env_raw["input_data"]:
@@ -117,56 +119,110 @@ class DiagnosticPipeline:
         eval_res = self.evaluator.evaluate(aggregated_data)
         logger.info(f"整体健康评估完毕 | 总分: {eval_res['score']} | 分布: {eval_res['fuzzy_distribution']}")
 
-        worst_risk = (-1.0, -1.0, 0.0)
-        worst_device, worst_f_name, worst_detail = "未知", "未知", {}
-        is_environment_issue = False
+        # -------------------------------------------------------------------
+        # [修改点1]：改为列表收集机制，支持多故障源并发收集
+        # -------------------------------------------------------------------
+        report_targets = []
+        lowest_score = 90.0
+        lowest_item = None
         
-        # 先排查机械的最差报警，作为默认主角（为了有图有真相）
+        # 1. 先排查机械类故障
         for device, info in eval_res.get('device_scores', {}).items():
             for f_name, detail in info.get('details', {}).items():
-                risk = self._get_risk_score(detail)
-                if risk > worst_risk:
-                    worst_risk, worst_device, worst_f_name, worst_detail = risk, device, f_name, detail
-        
-        # 再排查环境风险。只有环境风险绝对超越(>)机械最差风险时，才将主角让位给环境。
-        for env_name, info in eval_res.get('env_scores', {}).items():
-            risk = self._get_risk_score(info)
-            if risk > worst_risk:
-                worst_risk, worst_device, worst_f_name, worst_detail = risk, "环境与电气", env_name, info
-                is_environment_issue = True
-
-        img_paths, worst_data_info = {}, {}
-        if not is_environment_issue:
-            actual_fault_name = "bearing_fault" if worst_f_name.startswith("bearing_") else worst_f_name
-            cache_key = ""
-            for key in self.raw_data_cache:
-                if worst_device in key:
-                    cache_key = key
-                    break
-
-            if cache_key and cache_key in self.raw_data_cache:
-                worst_data_info = self.raw_data_cache[cache_key]
-                logger.info(f"定位核心风险点: [{cache_key}], 正在生成带寻峰标记的频谱图...")
+                if not isinstance(detail, dict) or 'score' not in detail:
+                    continue
+                score = detail.get('score', 100)
+                fuzzy = detail.get('fuzzy_distribution', {})
                 
-                vis_key = 'car' if worst_device == '轿厢' else actual_fault_name
-                display_cfg = self.config.get('visual_config', {}).get(vis_key, {})
-                combined_metrics = {**worst_data_info['features'], **worst_detail}
-                img_paths = self.visualizer.plot_worst_case(worst_data_info, display_cfg.get('display_metrics', []), combined_metrics)
-            else:
-                logger.warning(f"未能从波形缓存中定位到相关数据 (设备:{worst_device})")
-        else:
-            logger.warning(f"最大风险源于环境/灾变 [{worst_f_name}]，跳过波形生成。")
-            env_map = self.config.get('sensor_mapping', {}).get('ENV_001', {})
-            worst_data_info = {
-                'sensor_id': 'ENV_001 (环境探头)',
-                'location': env_map.get('location', '全局机房底坑环境'),
-                'component': env_map.get('component', '环境与电气'),
-                'fs': 'N/A',
-                'signal_data': []
-            }
+                # 若为高危项（H4），则直接进入分析列表
+                if 'H4' in fuzzy or detail.get('crisp_grade') == 'H4':
+                    report_targets.append({"device": device, "fault_name": f_name, "detail": detail})
+                
+                # 追踪当前全场最低分，作为备选方案
+                if score < lowest_score:
+                    lowest_score = score
+                    lowest_item = {"device": device, "fault_name": f_name, "detail": detail}
+        
+        # 2. 再排查环境风险
+        for env_name, info in eval_res.get('env_scores', {}).items():
+            score = info.get('score', 100)
+            fuzzy = info.get('fuzzy_distribution', {})
+            if 'H4' in fuzzy or info.get('crisp_grade') == 'H4':
+                report_targets.append({"device": "环境与电气", "fault_name": env_name, "detail": info})
+            if score < lowest_score:
+                lowest_score = score
+                lowest_item = {"device": "环境与电气", "fault_name": env_name, "detail": info}
 
+        # 3. 汇总判定：如果没有H4，但有低于90分的异常，则抓取最低分作为分析对象
+        if not report_targets and lowest_item:
+            report_targets.append(lowest_item)
+
+        # -------------------------------------------------------------------
+        # [修改点2]：生成所有报警项的详细数据结构与可视化图像
+        # -------------------------------------------------------------------
+        fault_cases = []
+        if not report_targets:
+            logger.info("系统整体运行优良，未发现明显风险隐患，无需生成异常波形图。")
+        else:
+            for target in report_targets:
+                device = target["device"]
+                f_name = target["fault_name"]
+                detail = target["detail"]
+                is_env = (device == "环境与电气")
+
+                img_paths, data_info = {}, {}
+                if not is_env:
+                    actual_fault_name = "bearing_fault" if f_name.startswith("bearing_") else f_name
+                    cache_key = ""
+                    # 防止同设备多故障(如曳引机同时发生motor和bearing故障)匹配混乱
+                    for key in self.raw_data_cache:
+                        if device in key and actual_fault_name in key:
+                            cache_key = key
+                            break
+                    if not cache_key:
+                        for key in self.raw_data_cache:
+                            if device in key:
+                                cache_key = key; break
+
+                    if cache_key and cache_key in self.raw_data_cache:
+                        data_info = self.raw_data_cache[cache_key]
+                        logger.info(f"提取预警项波形: [{device}-{f_name}]，正在生成验证视图...")
+                        
+                        vis_key = 'car' if device == '轿厢' else actual_fault_name
+                        display_cfg = self.config.get('visual_config', {}).get(vis_key, {})
+                        combined_metrics = {**data_info['features'], **detail}
+                        
+                        # 传入前缀，确保多故障生成的图片文件名不会互相覆盖
+                        prefix_name = f"{device}_{f_name}"
+                        img_paths = self.visualizer.plot_worst_case(
+                            data_info, display_cfg.get('display_metrics', []), combined_metrics, prefix=prefix_name
+                        )
+                    else:
+                        logger.warning(f"未能从波形缓存中定位到相关数据 (设备:{device})")
+                else:
+                    logger.warning(f"分析环境灾变风险 [{f_name}]，跳过波形生成。")
+                    env_map = self.config.get('sensor_mapping', {}).get('ENV_001', {})
+                    data_info = {
+                        'sensor_id': 'ENV_001 (环境探头)',
+                        'location': env_map.get('location', '全局机房底坑环境'),
+                        'component': env_map.get('component', '环境与电气'),
+                        'fs': 'N/A',
+                        'signal_data': []
+                    }
+                
+                fault_cases.append({
+                    "device": device,
+                    "fault_name": f_name,
+                    "detail": detail,
+                    "data_info": data_info,
+                    "img_paths": img_paths
+                })
+
+        # -------------------------------------------------------------------
+        # [修改点3]：将收集好的列表整体传入报表生成器
+        # -------------------------------------------------------------------
         reporter = FinalReportGenerator(self.config, eval_res, llm_advisor=self.llm_advisor)
-        reporter.generate(worst_device, worst_f_name, worst_detail, img_paths, worst_data_info, output_report_path)
+        reporter.generate(fault_cases, output_report_path)
 
 if __name__ == "__main__":
     pipeline = DiagnosticPipeline("master_config.yml")

@@ -9,7 +9,7 @@ class FaultDataGenerator:
     def __init__(self, root):
         self.root = root
         self.root.title("电梯数字孪生 - 故障波形仿真生成器")
-        self.root.geometry("480x520")
+        self.root.geometry("500x620")
         
         # 定义可选的故障类型及其在代码中的映射
         self.mech_options = {
@@ -27,123 +27,167 @@ class FaultDataGenerator:
             "设备异常位移 (>15cm)": {"key": "displacement", "short": "位移"}
         }
         
+        self.health_mode = tk.StringVar(value="fault_inject")
         self.mech_vars = {name: tk.BooleanVar() for name in self.mech_options}
         self.env_vars = {name: tk.BooleanVar() for name in self.env_options}
         
-        self.fs = 10000.0 # 默认采样率 10kHz
-        self.duration = 1.0 # 数据时长 1秒 (10000个点)
+        self.fs = 10000.0 
+        # [关键修改]：为了满足 2.0s滑窗且需要连续3个触发窗口，必须保证信号长度 >= 6.0s
+        self.duration = 8.0 
+        
+        self.mech_cbs = []
+        self.env_cbs = []
         
         self._build_gui()
+        self._toggle_state() # 初始化状态
 
     def _build_gui(self):
+        # 模式选择区
+        lf_mode = ttk.LabelFrame(self.root, text="第一步：选择数据包生成模式")
+        lf_mode.pack(padx=20, pady=10, fill="x")
+        
+        ttk.Radiobutton(lf_mode, text="高度健康 (全优状态，所有分项得分 > 90)", variable=self.health_mode, value="highly_healthy", command=self._toggle_state).pack(anchor="w", padx=10, pady=5)
+        ttk.Radiobutton(lf_mode, text="一般健康 (轻微退化，各项得分 80 ~ 90 之间)", variable=self.health_mode, value="healthy", command=self._toggle_state).pack(anchor="w", padx=10, pady=5)
+        ttk.Radiobutton(lf_mode, text="自定义故障注入 (严重异常，触发告警与 H4)", variable=self.health_mode, value="fault_inject", command=self._toggle_state).pack(anchor="w", padx=10, pady=5)
+
         # 机械故障区
-        lf_mech = ttk.LabelFrame(self.root, text="机械本体故障注入 (将生成特定的异常高频振动)")
+        lf_mech = ttk.LabelFrame(self.root, text="第二步：机械本体故障注入 (仅在自定义模式可用)")
         lf_mech.pack(padx=20, pady=10, fill="x")
         for name, var in self.mech_vars.items():
-            ttk.Checkbutton(lf_mech, text=name, variable=var).pack(anchor="w", padx=10, pady=5)
+            cb = ttk.Checkbutton(lf_mech, text=name, variable=var)
+            cb.pack(anchor="w", padx=10, pady=2)
+            self.mech_cbs.append(cb)
             
         # 环境故障区
-        lf_env = ttk.LabelFrame(self.root, text="环境与电气故障注入 (将修改 env_data.json 为 1 报警)")
+        lf_env = ttk.LabelFrame(self.root, text="第二步：环境与电气故障注入 (仅在自定义模式可用)")
         lf_env.pack(padx=20, pady=10, fill="x")
         for name, var in self.env_vars.items():
-            ttk.Checkbutton(lf_env, text=name, variable=var).pack(anchor="w", padx=10, pady=5)
+            cb = ttk.Checkbutton(lf_env, text=name, variable=var)
+            cb.pack(anchor="w", padx=10, pady=2)
+            self.env_cbs.append(cb)
             
         # 操作区
         frame_action = ttk.Frame(self.root)
-        frame_action.pack(pady=20)
+        frame_action.pack(pady=15)
         
         ttk.Button(frame_action, text="清除所有选择", command=self._clear_all).pack(side="left", padx=10)
         btn_generate = tk.Button(frame_action, text="生成测试数据包", bg="#1f77b4", fg="white", 
                                  font=("SimHei", 12, "bold"), command=self.generate_data)
         btn_generate.pack(side="left", padx=10)
 
+    def _toggle_state(self):
+        """根据选择的模式，启用或禁用底部的复选框"""
+        state = "normal" if self.health_mode.get() == "fault_inject" else "disabled"
+        for cb in self.mech_cbs + self.env_cbs:
+            if state == "disabled":
+                # 禁用时顺便取消勾选
+                for var in self.mech_vars.values(): var.set(False)
+                for var in self.env_vars.values(): var.set(False)
+            cb.config(state=state)
+
     def _clear_all(self):
         for var in self.mech_vars.values(): var.set(False)
         for var in self.env_vars.values(): var.set(False)
 
-    def _simulate_signal(self, fault_type, is_faulty):
-        """核心仿真引擎：基于物理公式生成带有特定特征的伪造波形"""
+    def _simulate_signal(self, fault_type, is_faulty, mode):
+        """核心仿真引擎：根据配置的 baseline(1.0) 和惩罚系数精准生成波形"""
         N = int(self.fs * self.duration)
         t = np.arange(N) / self.fs
         
-        # 基础健康波形：低频运转基波 (25Hz=1500RPM) + 轻微白噪声 (RMS约0.05)
-        base_noise = np.random.randn(N) * 0.05
-        base_signal = base_noise + np.sin(2 * np.pi * 25 * t) * 0.02
+        # --- 模式一：高度健康 ---
+        # Baseline为1.0。将RMS控制在0.5左右，永远达不到触发阈值，所有分数保持100分。
+        base_noise = np.random.randn(N) * 0.5 
+        base_signal = base_noise + np.sin(2 * np.pi * 25 * t) * 0.05
         
+        if mode == "highly_healthy":
+            return base_signal
+
+        # --- 模式二：一般健康 (模拟轻微退化) ---
+        # 需要RMS略大于1.0才能触发扣分机制，但扣分又不能太多
+        if mode == "healthy":
+            if fault_type in ['motor_fault', 'bearing_fault']:
+                # RMS=1.25, 惩罚率40 -> 扣分: (1.25-1.0)*40 = 10分 -> 得分: 90分
+                return np.random.randn(N) * 1.25
+            elif fault_type == 'car':
+                # 同上，加入少量冲击以触发CF因数超标
+                car_sig = np.random.randn(N) * 1.25
+                spike_idx = np.random.choice(N, 5, replace=False)
+                car_sig[spike_idx] = np.random.choice([1, -1], 5) * 5.0 
+                return car_sig
+            elif fault_type == 'bolt_loose':
+                # RMS=1.5, 惩罚率20 -> 扣分: (1.5-1.0)*20 = 10分 -> 得分: 90分
+                return np.random.randn(N) * 1.5
+            elif fault_type in ['wire_rope', 'rope_fault']:
+                # 钢丝绳采用分段计分：2~6区间的得分为 100~70。RMS=3.0 -> 得分 92.5分
+                return np.random.randn(N) * 3.0
+            elif fault_type == 'guide_rail':
+                # 导轨特殊：一旦RMS>1.0触发，磨损率就拉满0分，所以必须强制让导轨低于1.0
+                return base_signal
+            return base_signal
+
+        # --- 模式三：自定义故障注入 ---
         if not is_faulty:
             return base_signal
             
-        # 故障注入逻辑
+        # 故障注入逻辑：产生巨大的RMS，彻底击穿底线
         if fault_type == 'motor_fault':
-            # 电机异常：增加基频(25Hz)及其谐波的巨大振幅，RMS拉高
-            return base_signal + np.sin(2 * np.pi * 25 * t) * 0.6 + np.sin(2 * np.pi * 50 * t) * 0.2
-            
+            return base_signal + np.sin(2 * np.pi * 25 * t) * 2.0 + np.sin(2 * np.pi * 50 * t) * 1.5
         elif fault_type == 'bearing_fault':
-            # 轴承内圈磨损：生成 120Hz (BPFI) 的包络调制信号，载波为 3000Hz 共振区
             carrier = np.sin(2 * np.pi * 3000 * t)
-            envelope = np.maximum(0, np.cos(2 * np.pi * 120 * t)) ** 4 # 锐利的冲击波形
-            return base_signal + 0.8 * envelope * carrier
-            
+            envelope = np.maximum(0, np.cos(2 * np.pi * 120 * t)) ** 4
+            return base_signal + 3.0 * envelope * carrier
         elif fault_type == 'bolt_loose':
-            # 螺栓松动：随机产生宽频的剧烈冲击脉冲
-            impulses = (np.random.rand(N) > 0.995).astype(float) * np.random.randn(N) * 3.0
+            impulses = (np.random.rand(N) > 0.55).astype(float) * np.random.randn(N) * 8.0
             return base_signal + impulses
-            
         elif fault_type == 'wire_rope':
-            # 钢丝绳：整体随机宽频噪音放大 (代表磨损或干摩擦)
-            return np.random.randn(N) * 0.4
-            
+            return np.random.randn(N) * 10.0 # 绝对打滑
         elif fault_type == 'guide_rail':
-            # 导轨：极低频大位移晃动代表磨损导致的不平顺
-            return base_signal + np.sin(2 * np.pi * 2 * t) * 0.8
-            
+            return base_signal + np.sin(2 * np.pi * 2 * t) * 2.5
         elif fault_type == 'car':
-            # 轿厢：注入极少数离散的巨型尖峰，极大拉高波峰因数(Crest Factor)，但不增加总RMS
-            car_sig = base_signal.copy()
-            spike_indices = np.random.choice(N, 10, replace=False)
-            car_sig[spike_indices] = np.random.choice([1, -1], 10) * 8.0 
+            car_sig = np.random.randn(N) * 2.5
+            spike_indices = np.random.choice(N, 20, replace=False)
+            car_sig[spike_indices] = np.random.choice([1, -1], 20) * 15.0 
             return car_sig
             
         return base_signal
 
     def generate_data(self):
-        # 1. 搜集勾选项，组成文件夹名称
+        mode = self.health_mode.get()
         selected_shorts = []
         active_mech_faults = []
-        
-        for name, var in self.mech_vars.items():
-            if var.get():
-                selected_shorts.append(self.mech_options[name]["short"])
-                active_mech_faults.append(self.mech_options[name]["type"])
-                
-        # [调整]: 环境数据改为纯 0/1 开关量，匹配新的边缘计算下沉逻辑
         env_status = {"temperature": 0, "water": 0, "displacement": 0, "motor_current": 0, "noise_ratio": 0}
-        for name, var in self.env_vars.items():
-            if var.get():
-                selected_shorts.append(self.env_options[name]["short"])
-                key = self.env_options[name]["key"]
-                # 勾选即代表发生异常，置为 1
-                env_status[key] = 1
 
-        folder_name = "+".join(selected_shorts) if selected_shorts else "无故障"
-        
-        # 限制文件夹名称长度
-        if len(folder_name) > 50:
-            folder_name = "+".join(selected_shorts[:4]) + "等复合故障"
+        # 1. 搜集状态配置与决定文件夹名
+        if mode == "highly_healthy":
+            folder_name = "批次_高度健康_全优运行"
+        elif mode == "healthy":
+            folder_name = "批次_一般健康_轻微退化"
+        else:
+            for name, var in self.mech_vars.items():
+                if var.get():
+                    selected_shorts.append(self.mech_options[name]["short"])
+                    active_mech_faults.append(self.mech_options[name]["type"])
+            for name, var in self.env_vars.items():
+                if var.get():
+                    selected_shorts.append(self.env_options[name]["short"])
+                    env_status[self.env_options[name]["key"]] = 1
+                    
+            folder_name = "批次_故障_" + "+".join(selected_shorts) if selected_shorts else "批次_无故障基准"
+            if len(folder_name) > 50:
+                folder_name = "批次_故障_" + "+".join(selected_shorts[:4]) + "等复合异常"
 
         # 2. 创建输出目录
         output_dir = os.path.join("data", folder_name)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
-        # 3. 必须生成全套传感器的 CSV 供系统读取 (包含健康项和故障项)
-        # [调整]: 只有轿厢保留 3 通道，其他所有设备改为单通道
+        # 3. 生成全套传感器的 CSV
         standard_sensors = [
             ("81025", "motor_fault", ["Ch1"]),
             ("81025", "bearing_fault", ["Ch1"]),
             ("81025", "bolt_loose", ["Ch1"]),
             ("81026", "wire_rope", ["Ch1"]),
-            ("81027", "car", ["X", "Y", "Z"]),        # 仅轿厢为 3 通道
+            ("81027", "car", ["X", "Y", "Z"]),
             ("81028", "guide_rail", ["Ch1"])
         ]
 
@@ -151,12 +195,10 @@ class FaultDataGenerator:
             for sensor_id, fault_type, channels in standard_sensors:
                 is_faulty = (fault_type in active_mech_faults)
                 
-                # 生成所有通道的波形
                 data_dict = {}
                 for ch in channels:
-                    data_dict[ch] = self._simulate_signal(fault_type, is_faulty)
+                    data_dict[ch] = self._simulate_signal(fault_type, is_faulty, mode)
                 
-                # 构建 DataFrame 并按规范保存
                 df = pd.DataFrame(data_dict)
                 csv_path = os.path.join(output_dir, f"{sensor_id}_{fault_type}.csv")
                 
@@ -172,7 +214,7 @@ class FaultDataGenerator:
             with open(os.path.join(output_dir, "env_data.json"), 'w', encoding='utf-8') as f:
                 json.dump(env_status, f, indent=4, ensure_ascii=False)
 
-            messagebox.showinfo("生成成功", f"仿真数据已生成！\n\n文件夹: ./data/{folder_name}\n包含: 6个物理波形CSV文件 + 1个环境JSON\n\n您现在可以运行 main.py 并在GUI中选择该文件夹进行测试了！")
+            messagebox.showinfo("生成成功", f"仿真数据已生成！\n\n模式: {mode}\n时长: {self.duration}秒\n文件夹: ./data/{folder_name}\n\n您现在可以运行 main.py 进行测试。")
 
         except Exception as e:
             messagebox.showerror("生成失败", f"发生错误: {str(e)}")

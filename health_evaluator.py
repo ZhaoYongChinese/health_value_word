@@ -8,7 +8,6 @@ import os
 import datetime
 from typing import Dict, List, Union, Tuple
 
-from networkx import config
 
 try:
     import yaml

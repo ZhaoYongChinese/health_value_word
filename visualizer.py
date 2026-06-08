@@ -45,7 +45,7 @@ class SignalVisualizer:
                     ha='right', va='top', fontsize=9,
                     bbox=dict(boxstyle='round,pad=0.4', facecolor='white', alpha=0.85, edgecolor='#cccccc'))
 
-    def plot_worst_case(self, worst_data: dict, display_metrics: list, detail_scores: dict):
+    def plot_worst_case(self, worst_data: dict, display_metrics: list, detail_scores: dict, prefix: str = ""):
         signal_data = worst_data['signal_data']
         fs = worst_data['fs']
         channels = list(signal_data.keys())
@@ -55,6 +55,9 @@ class SignalVisualizer:
         text_str = "\n".join(metric_texts) if metric_texts else "无额外指标"
         paths = {}
         line_colors = ['#1f77b4', '#ff7f0e', '#8c564b']
+
+        # [修改点] 引入了前缀拼接机制，防止在多报警并发下生成的图像发生名称重写与覆盖
+        file_prefix = f"{prefix}_" if prefix else ""
 
         # 1. 原始信号时域波形
         fig, axes = plt.subplots(num_ch, 1, figsize=(10, 2.8 * num_ch), squeeze=False)
@@ -71,7 +74,8 @@ class SignalVisualizer:
                 ax.text(0.01, 0.95, text_str, transform=ax.transAxes, ha='left', va='top', 
                         bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
         axes[-1, 0].set_xlabel('时间 (s)')
-        plt.tight_layout(); p1 = os.path.join(self.output_dir, "time_domain.png")
+        plt.tight_layout()
+        p1 = os.path.join(self.output_dir, f"{file_prefix}time_domain.png")
         plt.savefig(p1, dpi=150); paths['time'] = p1; plt.close()
 
         # 2. 原始信号频谱 (FFT)
@@ -88,7 +92,8 @@ class SignalVisualizer:
             if i == 0: ax.set_title("原始信号频谱图 (FFT)")
             self._add_top_peaks(ax, xf, yf) # 智能寻峰标注
         axes[-1, 0].set_xlabel('频率 (Hz)')
-        plt.tight_layout(); p2 = os.path.join(self.output_dir, "spectrum.png")
+        plt.tight_layout()
+        p2 = os.path.join(self.output_dir, f"{file_prefix}spectrum.png")
         plt.savefig(p2, dpi=150); paths['spectrum'] = p2; plt.close()
 
         # 3. 包络解调谱
@@ -112,7 +117,8 @@ class SignalVisualizer:
             self._add_top_peaks(ax, xf[mask], yf[mask])
             
         axes[-1, 0].set_xlabel('频率 (Hz)')
-        plt.tight_layout(); p3 = os.path.join(self.output_dir, "envelope.png")
+        plt.tight_layout()
+        p3 = os.path.join(self.output_dir, f"{file_prefix}envelope.png")
         plt.savefig(p3, dpi=150); paths['envelope'] = p3; plt.close()
 
         return paths
