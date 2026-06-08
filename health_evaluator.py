@@ -8,6 +8,8 @@ import os
 import datetime
 from typing import Dict, List, Union, Tuple
 
+from networkx import config
+
 try:
     import yaml
 except ImportError:
@@ -21,13 +23,13 @@ GLOBAL_SETTINGS = {
         "bearing_fault": {"H1": [90, 101], "H2": [75, 90], "H3": [60, 75], "H4": [0, 60]},
         "bearing_inner": {"H1": [90, 101], "H2": [75, 90], "H3": [60, 75], "H4": [0, 60]},
         "bearing_outer": {"H1": [90, 101], "H2": [75, 90], "H3": [60, 75], "H4": [0, 60]},
-        "bearing_cage": {"H1": [90, 101], "H2": [80, 90], "H3": [50, 80], "H4": [0, 50]},
+        "bearing_cage": {"H1": [90, 101], "H2": [80, 90], "H3": [70, 80], "H4": [0, 70]},
         "bearing_ball": {"H1": [90, 101], "H2": [75, 90], "H3": [60, 75], "H4": [0, 60]},
-        "bolt_loose": {"H1": [90, 101], "H2": [70, 90], "H3": [40, 70], "H4": [0, 40]},
+        "bolt_loose": {"H1": [90, 101], "H2": [70, 90], "H3": [50, 70], "H4": [0, 50]},
         "rotor_misalignment": {"H1": [90, 101], "H2": [80, 90], "H3": [70, 80], "H4": [0, 70]},
         "stator_eccentricity": {"H1": [90, 101], "H2": [80, 90], "H3": [70, 80], "H4": [0, 70]},
-        "轿架振动": {"H1": [90, 101], "H2": [80, 90], "H3": [50, 80], "H4": [0, 50]},
-        "平稳度异常": {"H1": [90, 101], "H2": [80, 90], "H3": [60, 80], "H4": [0, 60]},
+        "frame_vibration": {"H1": [90, 101], "H2": [70, 90], "H3": [65, 70], "H4": [0, 65]},
+        "smoothness": {"H1": [90, 101], "H2": [70, 90], "H3": [55, 70], "H4": [0, 55]},
     },
     "scoring_params": {
         "traction": {
@@ -38,16 +40,16 @@ GLOBAL_SETTINGS = {
         },
         "wire_rope": {
             "segments": [
-                {"range": [0, 4], "score": [100, 100]},
-                {"range": [4, 6], "score": [100, 70]},
-                {"range": [6, 8], "score": [70, 30]},
-                {"range": [8, 9999], "score": [30, 0]}
+                {"range": [0, 2], "score": [100, 100]},
+                {"range": [2, 6], "score": [100, 70]},
+                {"range": [6, 10], "score": [70, 30]},
+                {"range": [10, 9999], "score": [30, 0]}
             ]
         },
         "guide_rail": {"max_wear": 100},
         "car": {
-            "frame_vibration_penalty": 40.0,   # Z轴严重扣分 (每单位rms-1扣40分)
-            "smoothness_penalty": 55.0         # X/Y轴中等扣分 (每单位rms-1扣55分)
+            "frame_vibration_penalty": 40.0,   
+            "smoothness_penalty": 35.0         
         }
     },
     "system_safety_baseline": 60.0
@@ -99,12 +101,11 @@ def score_to_fuzzy_distribution(score: float, unit_name: str = "default", transi
     probs = {g: round((m / total_mem) * 100, 1) for g, m in memberships.items() if m > 0} if total_mem > 0 else {min_grade: 100.0}
     return dict(sorted(probs.items(), key=lambda item: item[1], reverse=True))
 
-# --------------------------- 环境与电气评估函数 (边缘端预处理) ---------------------------
+# --------------------------- 环境与电气评估函数 ---------------------------
 def evaluate_env_status(status_flag: int) -> float:
     """
-    环境数据已在边缘端完成预处理和阈值判断。
-    0: 正常 -> 100分
-    1: 报警 -> 45分 (落入 H4 危险区间)
+    0: 正常 -> 健康
+    1: 报警 -> 报警
     """
     return 45.0 if status_flag == 1 else 100.0
 
@@ -112,20 +113,18 @@ def evaluate_env_status(status_flag: int) -> float:
 def evaluate_traction(data: Dict, config: Dict) -> Tuple[float, Dict[str, Union[float, Dict]]]:
     details = {}
     
-    # 1. 电机故障（新格式：单一故障类型 + 置信度）
+    # 1. 电机故障
     motor = data.get("motor_fault", {})
     rms = motor.get("rms_ratio", 1.0)
     
     # 提取故障类型和置信度
     fault_type = None
     confidence = None
-    # 先尝试从新格式中获取 (rotor_misalignment 或 stator_eccentricity)
     for key in ["rotor_misalignment", "stator_eccentricity"]:
         if key in motor:
             fault_type = key
             confidence = motor[key]
             break
-    # 兼容旧格式: 使用 "confidence" 字段
     if fault_type is None and "confidence" in motor:
         fault_type = "motor_fault"
         confidence = motor["confidence"]
@@ -136,20 +135,18 @@ def evaluate_traction(data: Dict, config: Dict) -> Tuple[float, Dict[str, Union[
         sub_score = max(0.0, 100.0 - penalty)
         motor_subs[fault_type] = sub_score
     else:
-        # 无故障或 rms <= 1
         if fault_type is not None:
             motor_subs[fault_type] = 100.0
         else:
             motor_subs["motor_fault"] = 100.0
     
-    # 电机综合得分：只有一个子项，直接取其分数
     motor_score = list(motor_subs.values())[0] if motor_subs else 100.0
     details["motor_fault"] = {
         "score": motor_score,
         "subs": motor_subs
     }
 
-    # 2. 轴承组（保持原逻辑）
+    # 2. 轴承组
     bearing = data.get("bearing_fault", {})
     bearing_rms = bearing.get("rms_ratio", 1.0)
     sub_weights = config.get("bearing_sub_weights", {"inner": 0.25, "outer": 0.25, "cage": 0.25, "ball": 0.25})
@@ -167,7 +164,7 @@ def evaluate_traction(data: Dict, config: Dict) -> Tuple[float, Dict[str, Union[
         if sub_score < min_bearing_sub:
             min_bearing_sub = sub_score
     
-    # 计算轴承综合分（加权+平滑惩罚）
+    # 计算轴承综合分
     bearing_total = sum(sub_score * sub_weights[sub] for sub, sub_score in 
                         zip(sub_weights.keys(), [bearing_subs[f"bearing_{s}"] for s in sub_weights.keys()]))
     bearing_total = apply_smooth_penalty(bearing_total, min_bearing_sub, config.get("safety_baseline", 60.0))
@@ -177,7 +174,7 @@ def evaluate_traction(data: Dict, config: Dict) -> Tuple[float, Dict[str, Union[
         "subs": bearing_subs
     }
 
-    # 3. 螺栓松动（保持原逻辑）
+    # 3. 螺栓松动
     bolt = data.get("bolt_loose", {})
     bolt_rms = bolt.get("rms_ratio", 1.0)
     if bolt_rms > 1.0:
@@ -211,8 +208,7 @@ def evaluate_guide_rail(data: Dict, config: Dict):
 
 def evaluate_car(data: Dict, config: Dict) -> Tuple[float, Dict]:
     """
-    新轿厢评估逻辑：
-    输入 data 包含 "directions" 列表，每个元素有 name, rms_ratio, crest_factor_ratio, impulse_factor_ratio, margin_factor_ratio
+    name, rms_ratio, crest_factor_ratio, impulse_factor_ratio, margin_factor_ratio
     判断轿架振动：Z轴 rms>=1 且 (PF,IF,MF 中至少两个 >1)
     判断平稳度异常：X或Y轴 rms>=1 且 对应轴至少一个特征 >1
     优先级：轿架振动 > 平稳度异常
@@ -238,7 +234,7 @@ def evaluate_car(data: Dict, config: Dict) -> Tuple[float, Dict]:
     used_rms = 1.0
     penalty_base = 0.0
     
-    # 轿架振动检测 (Z轴)
+    # 轿架振动检测
     if "Z" in axis_data:
         z = axis_data["Z"]
         if z["rms"] >= 1.0:
@@ -248,22 +244,17 @@ def evaluate_car(data: Dict, config: Dict) -> Tuple[float, Dict]:
                 used_rms = z["rms"]
                 penalty_base = config.get("frame_vibration_penalty", 40.0)
     
-    # 平稳度异常检测 (X或Y轴)
-    if trigger_type is None:
-        max_xy_rms = 1.0
-        xy_exceeded = False
-        for axis in ["X", "Y"]:
-            if axis in axis_data:
-                a = axis_data[axis]
-                if a["rms"] >= 1.0:
-                    if a["rms"] > max_xy_rms:
-                        max_xy_rms = a["rms"]
-                    if a["pf"] > 1.0 or a["if"] > 1.0 or a["mf"] > 1.0:
-                        xy_exceeded = True
-        if xy_exceeded and max_xy_rms >= 1.0:
-            trigger_type = "smoothness"
-            used_rms = max_xy_rms
-            penalty_base = config.get("smoothness_penalty", 55.0)
+    # 平稳度异常检测
+    anomaly_axes = []
+    for axis in ["X", "Y"]:
+        if axis in axis_data:
+            a = axis_data[axis]
+            if a["rms"] >= 1.0 and (a["pf"] > 1.0 or a["if"] > 1.0 or a["mf"] > 1.0):
+                anomaly_axes.append(a["rms"])
+    if anomaly_axes:
+        trigger_type = "smoothness"
+        used_rms = max(anomaly_axes)
+        penalty_base = config.get("smoothness_penalty", 35.0)
     
     # 计算得分并动态设置节点名称
     if trigger_type is None:
@@ -276,7 +267,7 @@ def evaluate_car(data: Dict, config: Dict) -> Tuple[float, Dict]:
     else:
         raw_score = 100.0 - (used_rms - 1.0) * penalty_base
         score = max(0.0, min(100.0, raw_score))
-        anomaly_type = "轿架振动" if trigger_type == "frame_vibration" else "平稳度异常"
+        anomaly_type = "frame_vibration" if trigger_type == "frame_vibration" else "smoothness"
         diagnosis = {
             "异常类型": anomaly_type,
             "触发RMS": used_rms,
@@ -285,10 +276,10 @@ def evaluate_car(data: Dict, config: Dict) -> Tuple[float, Dict]:
         }
         item_name = anomaly_type
     
-    # 返回：动态子项名称 + 诊断详情（只有子项会被格式化为得分节点）
+    # 返回：动态子项名称 + 诊断详情
     return score, {
-        item_name: score,         # 会被格式化为具体的得分节点 (如 "轿架振动" 或 "平稳度异常")
-        "诊断详情": diagnosis     # 原样保留，不会产生 H4 报警
+        item_name: score,         # 会被格式化为具体的得分节点
+        "诊断详情": diagnosis     
     }
 
 class HealthEvaluator:
@@ -297,7 +288,7 @@ class HealthEvaluator:
 
     def _load_config(self, config_input: Union[str, Dict]) -> Dict:
         base = {
-            "device_weights": {"曳引机": 0.4, "钢丝绳": 0.2, "导轨": 0.15, "轿厢": 0.25},
+            "device_weights": {"曳引机": 0.25, "钢丝绳": 0.25, "导轨": 0.25, "轿厢": 0.25},
             "fault_weights": {"motor_fault": 0.3, "bearing_fault": 0.5, "bolt_loose": 0.2},
             "bearing_sub_weights": {"inner": 0.25, "outer": 0.25, "cage": 0.25, "ball": 0.25},
             "env_checks": {"enable_temperature": False, "enable_water": False, "enable_current": False, "enable_noise": False, "enable_displacement": False}
@@ -361,7 +352,7 @@ class HealthEvaluator:
                     if isinstance(sub_content, (int, float)):
                         formatted_details[sub_unit] = self._format_score_node(sub_content, sub_unit)
                     else:
-                        # 对于轿厢等返回的复杂 details，直接保留原始信息（不格式化分数）
+                        # 对于轿厢等返回的复杂 details，直接保留原始信息
                         formatted_details[sub_unit] = sub_content
                 
             device_scores[device] = {
@@ -386,7 +377,7 @@ class HealthEvaluator:
         mech_sys_score = apply_smooth_penalty(weighted_mech_score, global_min_mech, GLOBAL_SETTINGS["system_safety_baseline"])
 
         # ========================================================
-        # 环境与电气 (边缘端传入 0/1, 一票否决)
+        # 环境与电气 (边缘端传入 0/1)
         # ========================================================
         env_scores = {}
         env_data = data.get("环境与电气", {})
@@ -418,7 +409,7 @@ class HealthEvaluator:
             "env_scores": env_scores
         }
 
-# ------------------------------- 测试脚本 (支持嵌套输出) ---------------------------------
+# ------------------------------- 测试脚本 ---------------------------------
 if __name__ == "__main__":
     if os.path.exists("input_data.json"):
         with open("input_data.json", "r", encoding="utf-8") as f:
@@ -469,7 +460,7 @@ if __name__ == "__main__":
             f.write(f"模糊分布: {result.get('fuzzy_distribution', {})}\n")
             f.write("-" * 50 + "\n")
             
-            f.write("\n【一、 环境与电气状态 (一票否决项)】\n")
+            f.write("\n【一、 环境与电气状态】\n")
             if not result['env_scores']:
                 f.write("  - 未开启相关检测或无数据接入\n")
             for env_name, info in result['env_scores'].items():
@@ -490,7 +481,7 @@ if __name__ == "__main__":
                                     f.write(f"      · {sub_name:<13} | 得分: {sub_info['score']:<6} | 等级: {sub_info['crisp_grade']}")
                                     f.write(f" | 模糊: {sub_info.get('fuzzy_distribution', {})}\n")
                         else:
-                            # 非标准得分节点（如轿厢的轴详情），直接打印
+                            # 非标准得分节点
                             f.write(f"    - {unit_name}: {unit_info}\n")
             f.write("\n" + "="*50 + "\n")
         
