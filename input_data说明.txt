@@ -1,0 +1,60 @@
+input_data.json为数据输入格式
+报警阈值：报警逻辑为实时值连续n次超过正常运行最大值的特定倍数，则报警值为正常运行最大值×特定倍数
+{
+  "input_data": {
+    "曳引机": {
+      "motor_fault": {
+        "rms_ratio": 2.2,   # 为rms超过报警阈值的倍数
+        "rotor_misalignment": 0.85  # 故障置信度，检测算法输出rotor_misalignment或者stator_eccentricity的置信度
+      },
+      "bearing_fault": {
+        "rms_ratio": 3.5,   # 为rms超过报警阈值的倍数
+        "inner": 0.95,  # 算法输出的各类故障的置信度
+        "outer": 0.20,
+        "cage": 0.30,
+        "ball": 0.20
+      },
+      "bolt_loose": {
+        "rms_ratio": 5.5    # 为rms超过报警阈值的倍数
+      }
+    },
+    "钢丝绳": {
+      "rms_baseline_ratio": 3.1 # 为rms超过报警阈值的倍数
+    },
+    "导轨": {
+      "wear_percent": 26.0  # 检测算法得到的导轨磨损情况
+    },
+    "轿厢": {
+      "directions": [
+        {
+          "name": "X",
+          "rms_ratio": 2.2, # 为rms超过报警阈值的倍数
+          "crest_factor_ratio": 1.5, # 为CF超过报警阈值的倍数
+          "impulse_factor_ratio": 1.2,  # 为IF超过报警阈值的倍数
+          "margin_factor_ratio": 1.0    # 为MF超过报警阈值的倍数
+        },
+        {
+          "name": "Y",
+          "rms_ratio": 3.8,
+          "crest_factor_ratio": 1.2,
+          "impulse_factor_ratio": 2.1,
+          "margin_factor_ratio": 3.0
+        },
+        {
+          "name": "Z",
+          "rms_ratio": 3.5,
+          "crest_factor_ratio": 1.2,
+          "impulse_factor_ratio": 4.1,
+          "margin_factor_ratio": 1.0
+        }
+      ]
+    },
+    "环境与电气": {
+      "temperature": 1, # 0，1：0为正常，1为故障
+      "water": 0,
+      "motor_current": 1,
+      "noise_ratio": 0,
+      "displacement": 0
+    }
+  }
+}
