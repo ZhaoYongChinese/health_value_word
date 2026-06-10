@@ -118,7 +118,7 @@ visual_config:
   stator_eccentricity: {display_metrics: ["rms_ratio", "confidence", "score"]}
   bearing_fault: {display_metrics: ["rms_ratio", "inner", "outer", "cage", "score"]}
   bolt_loose: {display_metrics: ["rms_ratio", "score"]}
-  guide_rail: {display_metrics: ["wear_percent", "score"]}
+  guide_rail: {display_metrics: ["guide_rail", "score"]}
 
 # ================= 5. 健康度评估体系 =================
 health_evaluation:
@@ -146,7 +146,7 @@ health_evaluation:
 # ================= 6. LLM 专家建议生成配置 =================
 llm_config:
   enable_llm: false
-  model_id: "Qwen/Qwen2.5-1.5B-Instruct"
+  model_id: "Qwen/Qwen2.5-3B-Instruct"
   temperature: 0.8
   max_tokens: 256
 

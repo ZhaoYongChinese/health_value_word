@@ -29,18 +29,31 @@ class LLMAdvisor:
     # For H4 validation: key terms that must appear (not the full phrase order)
     H4_KEY_TERMS = {
         'bearing_fault': ["更换轴承"],
-        'motor_fault':   ["停机", "激光对中"],
-        'bearing_cage':  ["停机", "大修"],
-        'bolt_loose':    ["禁行", "锁紧"],
-        'wire_rope':     ["停梯", "探伤"],
+        'motor_fault':   [["停机", "停止"], "激光对中"],
+        'bearing_cage':  [["停机", "停止"], "大修"],
+        'bolt_loose':    [["禁行", "停止"], "锁紧"],
+        'wire_rope':     [["停梯", "停止"], "探伤"],
         'guide_rail':    ["更换", "导靴"],
-        '轿架振动':       ["停梯", "排查轿架"],
-        '平稳度异常':     ["停机", "导靴", "导轨"],
+        'frame_vibration':  [["停梯", "停止"], "排查轿架"],
+        'smoothness':       [["停机", "停止"], "导靴", "导轨"],
+        'rotor_misalignment': [["停机", "停止"], "对中"],
+        'stator_eccentricity': [["停机", "停止"], "大修"],
+        'motor_current':  [["停机", "停止"], "控制柜"],
+        'noise_ratio':    [["停梯", "停止"]],
         'water':         ["拉闸", "断电"],
         'temperature':   ["空调", ["排风", "通风"]],
-        'displacement':  ["停梯", "结构"],
+        'displacement':  [["停梯", "停止"], "结构"],
         'default':       ["停梯", "全面排查"],
     }
+
+    # Patterns that are semantically wrong and must be rejected
+    FORBIDDEN_PATTERNS = [
+        "禁止禁行",   # double negation = allow operation (wrong)
+        "禁止停止",   # double negation
+        "禁止停机",   # double negation
+        "禁止停梯",   # double negation
+        "不建议停",   # should be imperative for H4
+    ]
 
     CORE_REQUIREMENTS = {
         # --- 曳引机电机 ---
@@ -48,6 +61,16 @@ class LLMAdvisor:
         ('motor_fault',   'H2'): "缩短巡检周期，检查润滑状态",
         ('motor_fault',   'H3'): "停梯检查固定底座及同心度",
         ('motor_fault',   'H4'): "立即停机进行激光对中校准",
+        # --- 转子不对中 ---
+        ('rotor_misalignment', 'H1'): "电机定转子同心度良好",
+        ('rotor_misalignment', 'H2'): "检查联轴器或底座",
+        ('rotor_misalignment', 'H3'): "安排对中校准",
+        ('rotor_misalignment', 'H4'): "立即停机使用激光对中仪重新校准",
+        # --- 定子偏心 ---
+        ('stator_eccentricity', 'H1'): "电机气隙均匀",
+        ('stator_eccentricity', 'H2'): "保持观察",
+        ('stator_eccentricity', 'H3'): "检查定子紧固状态",
+        ('stator_eccentricity', 'H4'): "立即断电停机大修",
         # --- 轴承（内外圈/滚动体） ---
         ('bearing_fault', 'H1'): "保持常规巡检",
         ('bearing_fault', 'H2'): "补充润滑脂",
@@ -55,28 +78,57 @@ class LLMAdvisor:
         ('bearing_fault', 'H4'): "立即开盖更换轴承",
         # --- 轴承保持架 ---
         ('bearing_cage',  'H1'): "保持常规监测",
+        ('bearing_cage',  'H2'): "维持观察",
         ('bearing_cage',  'H3'): "密切关注保持架状态",
         ('bearing_cage',  'H4'): "立即停机大修",
         # --- 底座螺栓松动 ---
         ('bolt_loose',    'H1'): "保持常规巡检",
+        ('bolt_loose',    'H2'): "常规巡检观察",
         ('bolt_loose',    'H3'): "安排力矩扳手复紧作业",
         ('bolt_loose',    'H4'): "必须立即禁行并重新锁紧",
         # --- 钢丝绳 ---
         ('wire_rope',     'H1'): "保持常规巡检",
+        ('wire_rope',     'H2'): "维持常规润滑",
         ('wire_rope',     'H3'): "做测力平衡",
         ('wire_rope',     'H4'): "必须立刻停梯进行探伤检测",
         # --- 导轨 ---
+        ('guide_rail',    'H1'): "导轨表面平整磨损率极低",
+        ('guide_rail',    'H2'): "定期润滑",
+        ('guide_rail',    'H3'): "加强润滑列入观察计划",
         ('guide_rail',    'H4'): "校轨更换导靴",
         # --- 轿架振动 ---
-        ('轿架振动',       'H3'): "检查导靴间隙及曳引钢丝绳张力平衡",
-        ('轿架振动',       'H4'): "立刻停梯全面排查轿架机械结构",
+        ('frame_vibration', 'H1'): "轿架运行平稳无明显冲击",
+        ('frame_vibration', 'H2'): "保持常规维护",
+        ('frame_vibration', 'H3'): "检查导靴间隙及曳引钢丝绳张力平衡",
+        ('frame_vibration', 'H4'): "立刻停梯全面排查轿架机械结构",
         # --- 平稳度异常 ---
-        ('平稳度异常',     'H3'): "安排校轨",
-        ('平稳度异常',     'H4'): "立即停机检查导靴与导轨磨损",
+        ('smoothness',     'H1'): "轿厢水平运行平稳",
+        ('smoothness',     'H2'): "属于正常范围",
+        ('smoothness',     'H3'): "安排校轨",
+        ('smoothness',     'H4'): "立即停机检查导靴与导轨磨损",
         # --- 环境 ---
+        ('water',         'H1'): "环境干燥无积水隐患",
+        ('water',         'H2'): "检查通风或除湿设备",
+        ('water',         'H3'): "排查漏水点",
         ('water',         'H4'): "立即拉闸断电",
+        ('temperature',   'H1'): "温度在理想工作范围",
+        ('temperature',   'H2'): "保持观察",
+        ('temperature',   'H3'): "开启空调增强排风散热",
         ('temperature',   'H4'): "立即检查机房空调与排风设备",
+        ('displacement',  'H1'): "结构稳定无异常位移",
+        ('displacement',  'H2'): "定期校准",
+        ('displacement',  'H3'): "安排工程复测",
         ('displacement',  'H4'): "必须立刻全面停梯测量结构沉降",
+        # --- 电流异常 ---
+        ('motor_current', 'H1'): "电流输出平稳无异常波动",
+        ('motor_current', 'H2'): "属正常现象",
+        ('motor_current', 'H3'): "排查抱闸及电气接触",
+        ('motor_current', 'H4'): "立即停机检查控制柜与电气回路",
+        # --- 异常噪声 ---
+        ('noise_ratio',   'H1'): "声学环境正常无异常噪音",
+        ('noise_ratio',   'H2'): "下次保养时关注",
+        ('noise_ratio',   'H3'): "安排维保人员到场确认",
+        ('noise_ratio',   'H4'): "立刻停梯",
         # --- 兜底 ---
         ('default',       'H1'): "按计划维保",
         ('default',       'H2'): "保持观察",
@@ -86,16 +138,20 @@ class LLMAdvisor:
 
     FAULT_TYPE_NAMES = {
         'motor_fault':   '曳引机电机故障',
+        'rotor_misalignment': '电机转子不对中',
+        'stator_eccentricity': '电机定子偏心',
         'bearing_fault': '轴承故障（内外圈/滚动体）',
         'bearing_cage':  '轴承保持架故障',
         'bolt_loose':    '曳引机底座螺栓松动',
         'wire_rope':     '钢丝绳故障',
         'guide_rail':    '导轨磨损故障',
-        '轿架振动':       '轿架Z轴振动异常',
-        '平稳度异常':     '轿厢X/Y轴平稳度异常',
+        'frame_vibration': '轿架Z轴振动异常',
+        'smoothness':    '轿厢X/Y轴平稳度异常',
         'water':         '底坑/机房水浸',
         'temperature':   '机房温度异常',
         'displacement':  '设备结构位移',
+        'motor_current': '电机电流异常',
+        'noise_ratio':   '机房异常噪声',
         'default':       '设备异常',
     }
 
@@ -107,31 +163,27 @@ class LLMAdvisor:
     }
 
     STYLE_HINTS_H4 = [
-        "请用正式专业的技术报告语气撰写。",
-        "请用简洁明了的工程术语撰写，直击要点。",
-        "请用一段连贯的文字撰写，先描述危害再给出处置意见。",
-        "请用客观严谨的评估结论形式撰写。",
+        "以资深维保工程师的鉴定口吻撰写，语气严谨客观。",
+        "使用简洁精准的工程术语，直接陈述危害结论和处置要求。",
+        "用一段连贯文字撰写，先分析风险后果再给出强制处置措施。",
     ]
 
     STYLE_HINTS_H3 = [
-        "请用正式专业的技术报告语气撰写。",
-        "请用简洁明了的工程术语撰写，直击要点。",
-        "请用一段连贯的文字撰写，从预防性维护角度强调提前干预的必要性。",
-        "请用客观严谨的评估结论形式撰写。",
+        "以资深维保工程师的口吻撰写预防性维护建议，语气专业肯定。",
+        "使用简洁精准的工程术语，强调提前干预的必要性和紧迫性。",
+        "用一段连贯文字撰写，从设备可靠性角度论述为什么需要安排检修。",
     ]
 
     STYLE_HINTS_GENERAL = [
-        "请用正式专业的技术报告语气撰写。",
-        "请用简洁明了的工程术语撰写，直击要点。",
-        "请用一段连贯的文字撰写，像真人专家写的诊断意见。",
-        "请从设备全生命周期管理角度撰写。",
+        "以资深维保工程师的口吻撰写诊断意见，语气专业务实。",
+        "使用简洁精准的工程术语，像真人专家手写的评语。",
+        "用一段连贯文字撰写，从设备全生命周期管理角度给出维护建议。",
     ]
 
     STYLE_HINTS_LOW = [
-        "请用正式专业的技术报告语气撰写，表达积极正面的评估结论。",
-        "请用简洁明了的工程术语撰写，强调设备状态良好、运行稳定。",
-        "请用一段连贯的文字撰写，像真人专家写的巡检评语。",
-        "请从设备全生命周期管理角度撰写，体现预防性维护理念。",
+        "以资深维保工程师的口吻撰写巡检评语，语气积极肯定。",
+        "使用简洁精准的工程术语，突出设备状态良好、运行稳定。",
+        "用一段连贯文字撰写，体现预防性维护理念和对设备长期可靠性的信心。",
     ]
 
     DOMAIN_CONTEXT = (
@@ -156,7 +208,7 @@ class LLMAdvisor:
     def __init__(self, config: dict):
         llm_cfg = config.get('llm_config', {})
         self.enabled = llm_cfg.get('enable_llm', True) and TRANSFORMERS_AVAILABLE
-        self.model_id = llm_cfg.get('model_id', 'Qwen/Qwen2.5-1.5B-Instruct')
+        self.model_id = llm_cfg.get('model_id', 'Qwen/Qwen2.5-3B-Instruct')
         self.temperature = llm_cfg.get('temperature', 0.8)
         self.max_tokens = llm_cfg.get('max_tokens', 200)
         self.fallback_advice = config.get('expert_advice', {})
@@ -222,7 +274,10 @@ class LLMAdvisor:
             style_hint,
         ]
 
-        parts.append("禁止输出称呼、问候语、开场白。禁止使用编号列表（1. 2. 3.）或项目符号（- ·）。必须输出一段连续完整的文字段落。")
+        parts.append("禁止输出称呼、问候语、开场白。")
+        parts.append("禁止使用编号列表（1. 2. 3.）或项目符号（- ·）。")
+        parts.append("禁止输出【高危】【预警】【轻度】【良好】等带括号的等级格式标签。")
+        parts.append("必须输出一段连续完整的文字段落，不少于40字，内容充实具体。")
 
         if risk_grade == 'H4':
             raw_terms = self.H4_KEY_TERMS.get(fault_type, self.H4_KEY_TERMS.get('default', []))
@@ -240,8 +295,18 @@ class LLMAdvisor:
 
     def _validate_output(self, text: str, fault_type: str, risk_grade: str) -> bool:
         text = text.strip()
-        if len(text) < 10:
+        if len(text) < 15:
             return False
+
+        # Check forbidden patterns (P0: double negation etc.)
+        for pattern in self.FORBIDDEN_PATTERNS:
+            if pattern in text:
+                logger.warning(
+                    f"LLM output contains forbidden pattern '{pattern}'. "
+                    f"Output: {text[:80]}..."
+                )
+                return False
+
         if risk_grade == 'H4':
             terms = self.H4_KEY_TERMS.get(fault_type, self.H4_KEY_TERMS.get('default', []))
             for term in terms:

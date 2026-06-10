@@ -203,7 +203,7 @@ def evaluate_wire_rope(data: Dict, config: Dict):
 
 def evaluate_guide_rail(data: Dict, config: Dict):
     score = linear_score(data.get("wear_percent", 0.0), 0, config["max_wear"], 100.0, 0.0)
-    return score, {"wear_percent": score}
+    return score, {"guide_rail": score}
 
 def evaluate_car(data: Dict, config: Dict) -> Tuple[float, Dict]:
     """
